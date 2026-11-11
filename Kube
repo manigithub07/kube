@@ -182,7 +182,160 @@ kubectl get rs
 kubectl exec deploy/web -- nginx -v
  
 kubectl rollout history deployment/web
-___________________________________________________________________________________________________
+______________________________________________________________________________________________________________________________________
+
+1.Use image httpd. Pod name apache-pod. Verify with kubectl get pods and kubectl describe pod apache-pod.
+
+bash
+kubectl run apache-pod --image=httpd     # creates a single pod
+kubectl get pods
+kubectl describe pod apache-pod          # events, IP, image, status
+
+Q2. Apache Deployment
+
+Create a deployment using image httpd, name apache-deployment. Verify using kubectl get deployments and kubectl get pods.
+
+bash
+kubectl create deployment apache-deployment --image=httpd
+kubectl get deployments ; kubectl get pods
+
+Q3. Increase and Decrease Replicas
+
+Increase replicas to 4. Verify ReplicaSet and Pods. Decrease replicas to 2. Verify with kubectl get rs and kubectl get pods.
+
+bash
+kubectl scale deployment apache-deployment --replicas=4
+kubectl get rs ; kubectl get pods        # rs = ReplicaSet
+kubectl scale deployment apache-deployment --replicas=2
+kubectl get rs ; kubectl get pods
+
+Q4. Use YAML File
+
+Create Apache Pod, Deployment, and Replica configuration using YAML. Write a YAML file for Apache Deployment, image httpd, replicas 3. Apply with kubectl apply -f apache-deployment.yaml. Verify all resources.
+
+apache-deployment.yaml:
+
+yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apache-deployment      # if it exists from Q2: kubectl delete deployment apache-deployment first
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: apache}
+  template:
+    metadata:
+      labels: {app: apache}    # must match the selector above
+    spec:
+      containers:
+      - name: apache
+        image: httpd
+        ports: [{containerPort: 80}]
+bash
+kubectl apply -f apache-deployment.yaml
+kubectl get all                          # deployment, replicaset and pods
+
+Q5. ClusterIP Service
+
+Expose Apache Deployment using ClusterIP. Service name apache-clusterip, port 80. Test service access inside the cluster.
+
+bash
+kubectl expose deployment apache-deployment --name=apache-clusterip --type=ClusterIP --port=80
+kubectl get svc
+kubectl run test --image=busybox --rm -it --restart=Never -- wget -qO- apache-clusterip
+# a temporary pod calls the service by name; the output is "It works!"
+
+Q6. NodePort Service
+
+Expose Apache Deployment using NodePort. Service name apache-nodeport, port 80. Access from browser using http://<node-ip>:<node-port>.
+
+bash
+kubectl expose deployment apache-deployment --name=apache-nodeport --type=NodePort --port=80
+kubectl get svc                          # note the node port, e.g. 80:3xxxx
+minikube ip                              # the node IP
+minikube service apache-nodeport --url   # easiest on the docker driver; gives a working URL
+
+Q7. LoadBalancer Service
+
+Expose Apache Deployment using LoadBalancer. Service name apache-loadbalancer, port 80. Verify external IP using kubectl get svc.
+
+bash
+kubectl expose deployment apache-deployment --name=apache-loadbalancer --type=LoadBalancer --port=80
+minikube tunnel                          # run in a SECOND terminal; it assigns the external IP
+kubectl get svc                          # EXTERNAL-IP changes from <pending> to an address
+
+Q8. Flask Application Deployment
+
+Create a simple Python Flask application. (1) Flask app to display PRN number and student name. (2) Create Dockerfile. (3) Build Docker image. (4) Deploy Flask app as a Kubernetes Deployment. (5) Create a Service to expose it. (6) Access output in browser.
+
+app.py:
+
+python
+from flask import Flask
+app = Flask(__name__)
+@app.route("/")
+def home():
+    return "PRN: <PRN><br>Name: <Your Name>"
+app.run(host="0.0.0.0", port=5000)   # 0.0.0.0 so it is reachable from outside the container
+
+Dockerfile:
+
+dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY app.py .
+RUN pip install flask
+CMD ["python", "app.py"]
+bash
+eval $(minikube docker-env)          # point your Docker CLI at minikube's Docker so it sees the image
+docker build -t flask-app:v1 .
+
+flask-deploy.yaml:
+
+yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: flask-deployment}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: flask}}
+  template:
+    metadata: {labels: {app: flask}}
+    spec:
+      containers:
+      - name: flask
+        image: flask-app:v1
+        imagePullPolicy: Never       # use the local image, don't try to pull it
+        ports: [{containerPort: 5000}]
+bash
+kubectl apply -f flask-deploy.yaml
+kubectl expose deployment flask-deployment --type=NodePort --port=5000
+minikube service flask-deployment    # opens the browser
+
+Q9. Rolling Update Flask Application
+
+Modify Flask app output to include PRN, student name and course name. Build new Docker image version. Update the Kubernetes Deployment with the new image. Verify using kubectl rollout status deployment/flask-deployment. Access updated output in browser.
+
+Change the return line to add <br>Course: <Course Name>, then:
+
+bash
+docker build -t flask-app:v2 .       # still inside minikube's docker-env
+kubectl set image deployment/flask-deployment flask=flask-app:v2   # container-name=new-image
+kubectl rollout status deployment/flask-deployment   # shows pods being replaced gradually
+
+Refresh the browser to see the new output.
+
+⚡ Cheat tips
+
+Dry-run YAML generator: kubectl create deployment x --image=httpd --replicas=3 --dry-run=client -o yaml > x.yaml. It prints a ready-made manifest, so you never type YAML from scratch.
+alias k=kubectl saves typing.
+ErrImagePull or ImagePullBackOff on the Flask app means you forgot eval $(minikube docker-env) before building, or forgot imagePullPolicy: Never.
+kubectl rollout undo deployment/flask-deployment rolls back.
+kubectl delete -f file.yaml removes everything a file created.
+The selector.matchLabels must match template.labels, or apply fails.
+
+__________________________________________________________________________________________________
 SHEET
 
 
